@@ -25,8 +25,9 @@ type Builder struct {
 	Pfbs  []*v1.IndexWrapper
 	Blobs []*Element
 
-	// for compact shares we use a counter to track the amount of shares needed
-	TxCounter  *share.CompactShareCounter
+	// TxCounter tracks the number of shares needed for regular Txs
+	TxCounter *share.CompactShareCounter
+	// PfbCounter tracks the number of shares needed for PFB txs.
 	PfbCounter *share.CompactShareCounter
 
 	done                 bool
@@ -112,21 +113,21 @@ func (b *Builder) AppendBlobTx(blobTx *tx.BlobTx) bool {
 	return false
 }
 
-// Export constructs the square.
+// Export constructs the square for this builder and returns it.
 func (b *Builder) Export() (Square, error) {
 	// if there are no transactions, return an empty square
 	if b.IsEmpty() {
 		return EmptySquare(), nil
 	}
 
-	// calculate the square size.
-	// NOTE: A future optimization could be to recalculate the currentSize based on the actual
-	// interblob padding used when the blobs are correctly ordered instead of using worst case padding.
-	ss := inclusion.BlobMinSquareSize(b.currentSize)
+	// TODO: A future optimization could be to recalculate the currentSize based
+	// on the actual interblob padding used when the blobs are correctly ordered
+	// instead of using worst case padding.
+	squareSize := inclusion.BlobMinSquareSize(b.currentSize)
 
-	// Sort the blobs by shares. This uses SliceStable to preserve the order
-	// of blobs within a namespace because b.Blobs are already ordered by tx
-	// priority.
+	// Sort the blobs by namespace. This uses SliceStable to preserve the order
+	// of blobs within the same namespace because b.Blobs are already ordered by
+	// tx priority.
 	sort.SliceStable(b.Blobs, func(i, j int) bool {
 		ns1 := b.Blobs[i].Blob.Namespace().Bytes()
 		ns2 := b.Blobs[j].Blob.Namespace().Bytes()
@@ -147,8 +148,6 @@ func (b *Builder) Export() (Square, error) {
 	endOfLastBlob := nonReservedStart
 	blobWriter := share.NewSparseShareSplitter()
 	for i, element := range b.Blobs {
-		// NextShareIndex returned where the next blob should start so as to comply with the share commitment rules
-		// We fill out the remaining
 		cursor = inclusion.NextShareIndex(cursor, element.NumShares, b.subtreeRootThreshold)
 		if i == 0 {
 			nonReservedStart = cursor
@@ -160,7 +159,7 @@ func (b *Builder) Export() (Square, error) {
 			return nil, fmt.Errorf("blob has %d padding shares, but %d was the max possible", padding, element.MaxPadding)
 		}
 
-		// record the starting share index of the blob in the PFB that paid for it
+		// Record the starting share index of the blob in the PFB that paid for it
 		b.Pfbs[element.PfbIndex].ShareIndexes[element.BlobIndex] = uint32(cursor)
 		// If this is not the first blob, we add padding by writing padded shares to the previous blob
 		// (which could be of a different namespace)
@@ -197,7 +196,7 @@ func (b *Builder) Export() (Square, error) {
 	}
 
 	// Write out the square
-	square, err := WriteSquare(txWriter, pfbWriter, blobWriter, nonReservedStart, ss)
+	square, err := WriteSquare(txWriter, pfbWriter, blobWriter, nonReservedStart, squareSize)
 	if err != nil {
 		return nil, fmt.Errorf("writing square: %w", err)
 	}
