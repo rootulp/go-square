@@ -371,3 +371,19 @@ func TestBigBlock(t *testing.T) {
 
 //go:embed "internal/testdata/big_block.json"
 var bigBlockJSON string
+
+func TestSquareTooSmall(t *testing.T) {
+	squareTooSmall := block{}
+	err := json.Unmarshal([]byte(squareTooSmallJSON), &squareTooSmall)
+	require.NoError(t, err)
+
+	builder, err := square.NewBuilder(defaultMaxSquareSize, defaultSubtreeRootThreshold, squareTooSmall.Txs...)
+	require.NoError(t, err)
+
+	_, err = builder.Export()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "writing square: square size 16 is too small to fit all blobs")
+}
+
+//go:embed "internal/testdata/square_too_small.json"
+var squareTooSmallJSON string
